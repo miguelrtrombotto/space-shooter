@@ -81,9 +81,12 @@ class Player(pygame.sprite.Sprite):
             shoot_sound.play()
             
 class Enemy(pygame.sprite.Sprite):
-    def __init__(self, x, y, special=False):
+    def __init__(self, x, y, special=False, can_shoot=False, triple_shot=False, level=1):
         super().__init__()
         self.special = special
+        self.can_shoot = can_shoot
+        self.triple_shot = triple_shot
+        self.level = level
         try:
             # Intentar cargar imagen del enemigo
             self.image = pygame.image.load(os.path.join('assets', 'enemy.png')).convert_alpha()
@@ -103,12 +106,25 @@ class Enemy(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center=(x, y))
         self.speed = random.randint(1, 3)
         self.health = 30
-        self.can_shoot = random.random() < 0.3
         self.shoot_delay = random.randint(2000, 4000)
         self.last_shot = pygame.time.get_ticks()
+        
+        # Movimiento horizontal para naves especiales en nivel 6+
+        if special and level >= 6:
+            self.horizontal_speed = random.choice([-2, -1, 1, 2])
+        else:
+            self.horizontal_speed = 0
     
     def update(self):
         self.rect.y += self.speed
+        
+        # Movimiento horizontal para naves especiales en nivel 6+
+        if self.horizontal_speed != 0:
+            self.rect.x += self.horizontal_speed
+            # Rebotar en los bordes
+            if self.rect.left <= 0 or self.rect.right >= WIDTH:
+                self.horizontal_speed = -self.horizontal_speed
+        
         if self.rect.top > HEIGHT:
             self.kill()
         
@@ -117,9 +133,18 @@ class Enemy(pygame.sprite.Sprite):
             if now - self.last_shot > self.shoot_delay:
                 self.last_shot = now
                 self.shoot_delay = random.randint(2000, 4000)
-                enemy_bullet = EnemyBullet(self.rect.centerx, self.rect.bottom)
-                all_sprites.add(enemy_bullet)
-                enemy_bullets.add(enemy_bullet)
+                
+                if self.triple_shot:
+                    # Disparo triple para naves especiales en nivel 4+
+                    for offset in [-15, 0, 15]:
+                        enemy_bullet = EnemyBullet(self.rect.centerx + offset, self.rect.bottom)
+                        all_sprites.add(enemy_bullet)
+                        enemy_bullets.add(enemy_bullet)
+                else:
+                    # Disparo normal
+                    enemy_bullet = EnemyBullet(self.rect.centerx, self.rect.bottom)
+                    all_sprites.add(enemy_bullet)
+                    enemy_bullets.add(enemy_bullet)
 
 class Bullet(pygame.sprite.Sprite):
     def __init__(self, x, y):
@@ -232,14 +257,25 @@ class EnemyWave:
         self.spawn_delay = 1000  # milisegundos entre apariciones
         self.last_spawn = 0
         self.wave_complete = False
+        self.level = 1
+        self.waves_in_level = 0
     
     def start_new_wave(self):
         self.wave_number += 1
+        self.waves_in_level += 1
+        
+        # Cambiar nivel cada 3 oleadas
+        if self.waves_in_level > 3:
+            self.level += 1
+            self.waves_in_level = 1
+            return True  # Indica cambio de nivel
+        
         # Incrementar enemigos gradualmente (máximo 15 por oleada)
         self.enemies_in_wave = min(5 + self.wave_number, 15)
         self.enemies_spawned = 0
         self.spawn_delay = max(300, 1000 - (self.wave_number * 50))  # Apariciones más rápidas conforme avanzan las oleadas
         self.wave_complete = False
+        return False
     
     def update(self):
         now = pygame.time.get_ticks()
@@ -264,9 +300,38 @@ class EnemyWave:
             x = random.randint(50, WIDTH-50)
             y = -40
         
-        # 10% de probabilidad de nave especial
-        special = random.random() < 0.1
-        enemy = Enemy(x, y, special)
+        # Determinar tipo de enemigo según el nivel
+        special = False
+        can_shoot = False
+        triple_shot = False
+        
+        if self.level == 1:
+            # Nivel 1: Solo naves comunes sin disparo
+            pass
+        elif self.level == 2:
+            # Nivel 2: Naves comunes, algunas disparan
+            can_shoot = random.random() < 0.3
+        elif self.level == 3:
+            # Nivel 3: Naves comunes + especiales
+            can_shoot = random.random() < 0.3
+            special = random.random() < 0.15
+        elif self.level == 4:
+            # Nivel 4: Naves comunes + especiales con disparo triple
+            can_shoot = random.random() < 0.4
+            special = random.random() < 0.2
+            if special:
+                triple_shot = random.random() < 0.5
+        elif self.level >= 5:
+            # Nivel 5+: Naves comunes + especiales con disparo triple
+            can_shoot = random.random() < 0.4
+            special = random.random() < 0.2
+            if special:
+                triple_shot = random.random() < 0.5
+            elif can_shoot and not special:
+                # Naves comunes también pueden tener disparo triple
+                triple_shot = random.random() < 0.3
+        
+        enemy = Enemy(x, y, special, can_shoot, triple_shot, self.level)
         all_sprites.add(enemy)
         enemies.add(enemy)
         
@@ -379,6 +444,42 @@ def show_high_scores():
             elif event.type == pygame.KEYUP:
                 waiting = False
     
+def apply_red_tint(surface, level):
+    # Crear superficie con tono rojizo basado en el nivel
+    red_intensity = min(20 + (level - 1) * 8, 100)  # Máximo 100 para no opacar demasiado
+    tint_surface = pygame.Surface((WIDTH, HEIGHT))
+    tint_surface.fill((red_intensity, 0, 0))
+    tint_surface.set_alpha(30 + (level - 1) * 5)  # Transparencia que aumenta con el nivel
+    surface.blit(tint_surface, (0, 0), special_flags=pygame.BLEND_ADD)
+
+def show_level_announcement(level):
+    start_time = pygame.time.get_ticks()
+    duration = 2000  # 2 segundos
+    
+    while pygame.time.get_ticks() - start_time < duration:
+        if background:
+            screen.blit(background, (0, 0))
+        else:
+            screen.fill(BLACK)
+            for star in stars:
+                star.draw(screen)
+        
+        # Aplicar tono rojizo según el nivel
+        if level >= 4:
+            apply_red_tint(screen, level)
+        
+        level_text = big_font.render(f"NIVEL {level}", True, YELLOW)
+        screen.blit(level_text, (WIDTH//2 - level_text.get_width()//2, HEIGHT//2))
+        
+        pygame.display.flip()
+        clock.tick(FPS)
+        
+        # Permitir salir durante el anuncio
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
 def show_start_screen():
     screen.fill(BLACK)
     if background:
@@ -475,6 +576,9 @@ if __name__ == "__main__":
     # Crear controlador de oleadas de enemigos
     wave_controller = EnemyWave()
     wave_controller.start_new_wave()
+    
+    # Mostrar anuncio del nivel 1
+    show_level_announcement(1)
 
     # Cargar sonidos
     try:
@@ -561,7 +665,9 @@ if __name__ == "__main__":
             
             # Iniciar nueva oleada si la actual está completa
             if wave_controller.wave_complete and len(enemies) == 0:
-                wave_controller.start_new_wave()
+                level_changed = wave_controller.start_new_wave()
+                if level_changed:
+                    show_level_announcement(wave_controller.level)
             
             # Actualizar todos los sprites
             all_sprites.update()
@@ -634,6 +740,10 @@ if __name__ == "__main__":
             for star in stars:
                 star.draw(screen)
         
+        # Aplicar tono rojizo según el nivel
+        if wave_controller.level >= 4:
+            apply_red_tint(screen, wave_controller.level)
+        
         # Dibujar todos los sprites
         all_sprites.draw(screen)
         
@@ -649,8 +759,10 @@ if __name__ == "__main__":
         draw_lives(screen, 20, 20, lives, max_lives, font)
         score_text = font.render(f"Puntos: {score}", True, WHITE)
         wave_text = font.render(f"Oleada: {wave_controller.wave_number}", True, WHITE)
+        level_text = font.render(f"Nivel: {wave_controller.level}", True, WHITE)
         screen.blit(score_text, (WIDTH - score_text.get_width() - 10, 10))
         screen.blit(wave_text, (WIDTH - wave_text.get_width() - 10, 50))
+        screen.blit(level_text, (WIDTH - level_text.get_width() - 10, 90))
         
         if paused:
             pause_text = big_font.render("PAUSADO", True, WHITE)
@@ -687,6 +799,7 @@ if __name__ == "__main__":
                 # Reiniciar controlador de oleadas
                 wave_controller = EnemyWave()
                 wave_controller.start_new_wave()
+                show_level_announcement(1)
             else:
                 running = False
         
