@@ -3,6 +3,7 @@ import random
 import sys
 import os
 import math
+import json
 from pygame import mixer
 
 # Inicializar pygame
@@ -119,6 +120,7 @@ class Enemy(pygame.sprite.Sprite):
                 enemy_bullet = EnemyBullet(self.rect.centerx, self.rect.bottom)
                 all_sprites.add(enemy_bullet)
                 enemy_bullets.add(enemy_bullet)
+
 class Bullet(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
@@ -291,6 +293,91 @@ def draw_lives(surface, x, y, lives, max_lives, font):
             # Círculo negro con borde blanco para vidas perdidas
             pygame.draw.circle(surface, BLACK, (circle_x, circle_y), circle_radius)
             pygame.draw.circle(surface, WHITE, (circle_x, circle_y), circle_radius, 2)
+
+def load_scores():
+    try:
+        with open('scores.json', 'r') as f:
+            return json.load(f)
+    except:
+        return []
+
+def save_scores(scores):
+    with open('scores.json', 'w') as f:
+        json.dump(scores, f)
+
+def add_score(initials, score):
+    scores = load_scores()
+    scores.append({'initials': initials, 'score': score})
+    scores.sort(key=lambda x: x['score'], reverse=True)
+    scores = scores[:10]
+    save_scores(scores)
+
+def get_player_initials():
+    initials = ""
+    input_active = True
+    
+    while input_active:
+        screen.fill(BLACK)
+        if background:
+            screen.blit(background, (0, 0))
+        else:
+            for star in stars:
+                star.draw(screen)
+        
+        title = big_font.render("INGRESA TUS INICIALES", True, WHITE)
+        prompt = font.render("Escribe 3 letras y presiona ENTER:", True, WHITE)
+        current = font.render(initials + "_" * (3 - len(initials)), True, YELLOW)
+        
+        screen.blit(title, (WIDTH//2 - title.get_width()//2, HEIGHT//3))
+        screen.blit(prompt, (WIDTH//2 - prompt.get_width()//2, HEIGHT//2))
+        screen.blit(current, (WIDTH//2 - current.get_width()//2, HEIGHT//2 + 50))
+        
+        pygame.display.flip()
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN and len(initials) == 3:
+                    input_active = False
+                elif event.key == pygame.K_BACKSPACE:
+                    initials = initials[:-1]
+                elif len(initials) < 3 and event.unicode.isalpha():
+                    initials += event.unicode.upper()
+    
+    return initials
+
+def show_high_scores():
+    scores = load_scores()
+    waiting = True
+    
+    while waiting:
+        screen.fill(BLACK)
+        if background:
+            screen.blit(background, (0, 0))
+        else:
+            for star in stars:
+                star.draw(screen)
+        
+        title = big_font.render("MEJORES PUNTAJES", True, WHITE)
+        screen.blit(title, (WIDTH//2 - title.get_width()//2, 50))
+        
+        for i, score_data in enumerate(scores[:10]):
+            rank_text = font.render(f"{i+1:2d}. {score_data['initials']} - {score_data['score']:,}", True, WHITE)
+            screen.blit(rank_text, (WIDTH//2 - rank_text.get_width()//2, 120 + i * 40))
+        
+        continue_text = font.render("Presiona cualquier tecla para continuar", True, WHITE)
+        screen.blit(continue_text, (WIDTH//2 - continue_text.get_width()//2, HEIGHT - 50))
+        
+        pygame.display.flip()
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYUP:
+                waiting = False
     
 def show_start_screen():
     screen.fill(BLACK)
@@ -327,7 +414,7 @@ def show_game_over_screen():
         for star in stars:
             star.draw(screen)
     
-    game_over = big_font.render("JUEGO TERMINADO ÑERI", True, RED)
+    game_over = big_font.render("JUEGO TERMINADO", True, RED)
     final_score = font.render(f"Puntuación Final: {score}", True, WHITE)
     restart = font.render("Presiona cualquier tecla para reiniciar o ESC para salir", True, WHITE)
     
@@ -345,9 +432,9 @@ def show_game_over_screen():
                 sys.exit()
             if event.type == pygame.KEYUP:
                 if event.key == pygame.K_ESCAPE:
-                    return False  # Salir
+                    return False
                 else:
-                    return True  # Reiniciar con cualquier otra tecla
+                    return True
                 
 if __name__ == "__main__":
     # Crear ventana del juego
@@ -362,6 +449,19 @@ if __name__ == "__main__":
     except:
         background = None
 
+    # Crear estrellas para el fondo (si no hay imagen de fondo)
+    stars = [Star() for _ in range(STAR_COUNT)] if background is None else []
+    
+    # Variables de fuentes
+    font = pygame.font.Font(None, 36)
+    big_font = pygame.font.Font(None, 72)
+    
+    # Obtener iniciales del jugador
+    player_initials = get_player_initials()
+    
+    # Mostrar puntajes altos
+    show_high_scores()
+
     # Crear grupos de sprites
     all_sprites = pygame.sprite.Group()
     enemies = pygame.sprite.Group()
@@ -371,9 +471,6 @@ if __name__ == "__main__":
     # Crear jugador
     player = Player()
     all_sprites.add(player)
-
-    # Crear estrellas para el fondo (si no hay imagen de fondo)
-    stars = [Star() for _ in range(STAR_COUNT)] if background is None else []
 
     # Crear controlador de oleadas de enemigos
     wave_controller = EnemyWave()
@@ -395,8 +492,6 @@ if __name__ == "__main__":
     score = 0
     game_over = False
     paused = False
-    font = pygame.font.Font(None, 36)
-    big_font = pygame.font.Font(None, 72)
     
     # Sistema de vidas
     lives = 4
@@ -518,18 +613,18 @@ if __name__ == "__main__":
                 halo = EnergyHalo(player.rect.centerx, player.rect.centery)
                 energy_halos.append(halo)
                 
-                if lives <= 0 and not player_exploding:
-                    player_exploding = True
-                    explosion_start_time = pygame.time.get_ticks()
-                    explosion_sounds_played = 0
-                    # Crear fragmentos de explosión
-                    for _ in range(15):
-                        fragment = PlayerFragment(player.rect.centerx, player.rect.centery)
-                        explosion_fragments.append(fragment)
-                    # Ocultar jugador
-                    player.rect.x = -1000
-                    # Iniciar sonido continuo de explosión
-                    explosion_sound_channel = explosion_sound.play(loops=-1)
+            if lives <= 0 and not player_exploding:
+                player_exploding = True
+                explosion_start_time = pygame.time.get_ticks()
+                explosion_sounds_played = 0
+                # Crear fragmentos de explosión
+                for _ in range(15):
+                    fragment = PlayerFragment(player.rect.centerx, player.rect.centery)
+                    explosion_fragments.append(fragment)
+                # Ocultar jugador
+                player.rect.x = -1000
+                # Iniciar sonido continuo de explosión
+                explosion_sound_channel = explosion_sound.play(loops=-1)
         
         # Dibujar
         if background:
@@ -562,7 +657,13 @@ if __name__ == "__main__":
             screen.blit(pause_text, (WIDTH//2 - pause_text.get_width()//2, HEIGHT//2))
         
         if game_over:
+            # Guardar puntaje
+            add_score(player_initials, score)
+            
             if show_game_over_screen():
+                # Mostrar puntajes altos
+                show_high_scores()
+                
                 # Reiniciar juego
                 game_over = False
                 score = 0
@@ -594,5 +695,3 @@ if __name__ == "__main__":
 
     pygame.quit()
     sys.exit()
-    
-            
