@@ -23,6 +23,7 @@ RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 YELLOW = (255, 255, 0)
+MAGENTA = (255, 0, 255)
 
 class Player(pygame.sprite.Sprite):
     def __init__(self):
@@ -54,31 +55,70 @@ class Player(pygame.sprite.Sprite):
         now = pygame.time.get_ticks()
         if now - self.last_shot > self.shoot_delay:
             self.last_shot = now
-            bullet = Bullet(self.rect.centerx, self.rect.top)
-            all_sprites.add(bullet)
-            bullets.add(bullet)
+            shot_level = getattr(self, 'shot_level', 1)
+            
+            if shot_level == 1:
+                # Disparo normal
+                bullet = Bullet(self.rect.centerx, self.rect.top)
+                all_sprites.add(bullet)
+                bullets.add(bullet)
+            elif shot_level == 3:
+                # Disparo triple
+                bullet1 = Bullet(self.rect.centerx - 15, self.rect.top)
+                bullet2 = Bullet(self.rect.centerx, self.rect.top)
+                bullet3 = Bullet(self.rect.centerx + 15, self.rect.top)
+                all_sprites.add(bullet1, bullet2, bullet3)
+                bullets.add(bullet1, bullet2, bullet3)
+            elif shot_level >= 6:
+                # Disparo séxtuple
+                positions = [-30, -18, -6, 6, 18, 30]
+                for pos in positions:
+                    bullet = Bullet(self.rect.centerx + pos, self.rect.top)
+                    all_sprites.add(bullet)
+                    bullets.add(bullet)
+            
             shoot_sound.play()
             
 class Enemy(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+    def __init__(self, x, y, special=False):
         super().__init__()
+        self.special = special
         try:
             # Intentar cargar imagen del enemigo
             self.image = pygame.image.load(os.path.join('assets', 'enemy.png')).convert_alpha()
-            self.image = pygame.transform.scale(self.image, (40, 40))
+            if special:
+                self.image = pygame.transform.scale(self.image, (80, 80))  # Doble tamaño para especiales
+            else:
+                self.image = pygame.transform.scale(self.image, (40, 40))
         except:
             # Si no se encuentra la imagen, crear una superficie en blanco
-            self.image = pygame.Surface((40, 40))
-            self.image.fill(RED)
+            if special:
+                self.image = pygame.Surface((80, 80))  # Doble tamaño para especiales
+                self.image.fill(MAGENTA)  # Nave especial magenta
+            else:
+                self.image = pygame.Surface((40, 40))
+                self.image.fill(RED)
 
         self.rect = self.image.get_rect(center=(x, y))
         self.speed = random.randint(1, 3)
         self.health = 30
+        self.can_shoot = random.random() < 0.3
+        self.shoot_delay = random.randint(2000, 4000)
+        self.last_shot = pygame.time.get_ticks()
     
     def update(self):
         self.rect.y += self.speed
         if self.rect.top > HEIGHT:
             self.kill()
+        
+        if self.can_shoot and self.rect.y > 0 and self.rect.y < HEIGHT - 100:
+            now = pygame.time.get_ticks()
+            if now - self.last_shot > self.shoot_delay:
+                self.last_shot = now
+                self.shoot_delay = random.randint(2000, 4000)
+                enemy_bullet = EnemyBullet(self.rect.centerx, self.rect.bottom)
+                all_sprites.add(enemy_bullet)
+                enemy_bullets.add(enemy_bullet)
 class Bullet(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
@@ -96,6 +136,19 @@ class Bullet(pygame.sprite.Sprite):
     def update(self):
         self.rect.y -= self.speed
         if self.rect.bottom < 0:
+            self.kill()
+            
+class EnemyBullet(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        super().__init__()
+        self.image = pygame.Surface((4, 10))
+        self.image.fill(RED)
+        self.rect = self.image.get_rect(center=(x, y))
+        self.speed = 5
+    
+    def update(self):
+        self.rect.y += self.speed
+        if self.rect.top > HEIGHT:
             self.kill()
             
 class Star:
@@ -209,7 +262,9 @@ class EnemyWave:
             x = random.randint(50, WIDTH-50)
             y = -40
         
-        enemy = Enemy(x, y)
+        # 10% de probabilidad de nave especial
+        special = random.random() < 0.1
+        enemy = Enemy(x, y, special)
         all_sprites.add(enemy)
         enemies.add(enemy)
         
@@ -311,6 +366,7 @@ if __name__ == "__main__":
     all_sprites = pygame.sprite.Group()
     enemies = pygame.sprite.Group()
     bullets = pygame.sprite.Group()
+    enemy_bullets = pygame.sprite.Group()
 
     # Crear jugador
     player = Player()
@@ -357,6 +413,9 @@ if __name__ == "__main__":
     
     # Variables de efecto de halo
     energy_halos = []
+    
+    # Sistema de niveles de disparo
+    player.shot_level = 1
 
     # Bucle principal del juego
     running = True
@@ -427,13 +486,34 @@ if __name__ == "__main__":
             hits = pygame.sprite.groupcollide(enemies, bullets, True, True)
             for hit in hits:
                 explosion_sound.play()
-                score += 50 - hit.speed * 10  # Enemigos más rápidos dan menos puntos
+                if hit.special:
+                    # Nave especial mejora el nivel de disparo
+                    if player.shot_level == 1:
+                        player.shot_level = 3  # De normal a triple
+                    elif player.shot_level == 3:
+                        player.shot_level = 6  # De triple a séxtuple
+                    score += 100  # Más puntos por nave especial
+                else:
+                    score += 50 - hit.speed * 10  # Enemigos más rápidos dan menos puntos
             
             # Verificar colisiones jugador-enemigo
             hits = pygame.sprite.spritecollide(player, enemies, True)
             for hit in hits:
                 explosion_sound.play()
                 lives -= 1
+                # Resetear a disparo normal al perder una vida
+                player.shot_level = 1
+                # Crear halo de energía cuando se pierde una vida
+                halo = EnergyHalo(player.rect.centerx, player.rect.centery)
+                energy_halos.append(halo)
+            
+            # Verificar colisiones bala enemiga-jugador
+            bullet_hits = pygame.sprite.spritecollide(player, enemy_bullets, True)
+            for bullet_hit in bullet_hits:
+                explosion_sound.play()
+                lives -= 1
+                # Resetear a disparo normal al perder una vida
+                player.shot_level = 1
                 # Crear halo de energía cuando se pierde una vida
                 halo = EnergyHalo(player.rect.centerx, player.rect.centery)
                 energy_halos.append(halo)
@@ -500,6 +580,7 @@ if __name__ == "__main__":
                 
                 # Recrear jugador
                 player = Player()
+                player.shot_level = 1
                 all_sprites.add(player)
                 
                 # Reiniciar controlador de oleadas
