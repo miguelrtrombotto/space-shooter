@@ -143,6 +143,31 @@ class PlayerFragment:
                 ry = dx * math.sin(angle) + dy * math.cos(angle)
                 points.append((self.x + rx, self.y + ry))
             pygame.draw.polygon(screen, self.color, points)
+            
+class EnergyHalo:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.radius = 10
+        self.max_radius = 80
+        self.alpha = 255
+        self.life = 60
+        self.expand_speed = 2
+    
+    def update(self):
+        self.radius += self.expand_speed
+        self.alpha = int(255 * (self.life / 60))
+        self.life -= 1
+    
+    def draw(self, screen):
+        if self.life > 0 and self.radius < self.max_radius:
+            halo_surface = pygame.Surface((self.max_radius * 2, self.max_radius * 2), pygame.SRCALPHA)
+            for i in range(3):
+                radius = max(1, self.radius - i * 5)
+                alpha = max(0, self.alpha - i * 50)
+                color = (*YELLOW[:3], alpha)
+                pygame.draw.circle(halo_surface, color, (self.max_radius, self.max_radius), radius, 3)
+            screen.blit(halo_surface, (self.x - self.max_radius, self.y - self.max_radius))
         
 class EnemyWave:
     def __init__(self):
@@ -329,6 +354,9 @@ if __name__ == "__main__":
     explosion_fragments = []
     explosion_duration = 3000
     explosion_sound_channel = None
+    
+    # Variables de efecto de halo
+    energy_halos = []
 
     # Bucle principal del juego
     running = True
@@ -389,6 +417,12 @@ if __name__ == "__main__":
                 for star in stars:
                     star.update()
             
+            # Actualizar halos de energía
+            for halo in energy_halos[:]:
+                halo.update()
+                if halo.life <= 0:
+                    energy_halos.remove(halo)
+            
             # Verificar colisiones bala-enemigo
             hits = pygame.sprite.groupcollide(enemies, bullets, True, True)
             for hit in hits:
@@ -400,6 +434,10 @@ if __name__ == "__main__":
             for hit in hits:
                 explosion_sound.play()
                 lives -= 1
+                # Crear halo de energía cuando se pierde una vida
+                halo = EnergyHalo(player.rect.centerx, player.rect.centery)
+                energy_halos.append(halo)
+                
                 if lives <= 0 and not player_exploding:
                     player_exploding = True
                     explosion_start_time = pygame.time.get_ticks()
@@ -428,6 +466,10 @@ if __name__ == "__main__":
         for fragment in explosion_fragments:
             fragment.draw(screen)
         
+        # Dibujar halos de energía
+        for halo in energy_halos:
+            halo.draw(screen)
+        
         # Dibujar interfaz de usuario
         draw_lives(screen, 20, 20, lives, max_lives, font)
         score_text = font.render(f"Puntos: {score}", True, WHITE)
@@ -448,6 +490,7 @@ if __name__ == "__main__":
                 player_exploding = False
                 explosion_sounds_played = 0
                 explosion_fragments.clear()
+                energy_halos.clear()
                 if explosion_sound_channel:
                     explosion_sound_channel.stop()
                 
